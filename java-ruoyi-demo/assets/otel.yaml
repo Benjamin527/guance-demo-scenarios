@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metrics
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: metrics
+data:
+  config.yaml: |
+    receivers:
+      hostmetrics:
+        collection_interval: 10s
+        scrapers:
+          cpu:
+          memory:
+
+    processors:
+      resource:
+        attributes:
+          - key: pod_name
+            value: ${POD_NAME}
+            action: insert
+      batch:
+
+    exporters:
+      otlp:
+        endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+        tls:
+          insecure: true
+
+    service:
+      pipelines:
+        metrics:
+          receivers: [hostmetrics]
+          processors: [resource, batch]
+          exporters: [otlp]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: otel-metrics-generator
+  namespace: metrics
+  labels:
+    app: otel-metrics-generator
+spec:
+  containers:
+    - name: otel-metrics-generator
+      image: otel/opentelemetry-collector-contrib:latest
+      env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://datakit-service.datakit.svc.cluster.local:4317"
+
+        # Downward API：注入当前 Pod 名称
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+
+      volumeMounts:
+        - name: otel-config-vol
+          mountPath: /etc/otel-collector
+          readOnly: true
+
+      args:
+        - "--config=/etc/otel-collector/config.yaml"
+
+  volumes:
+    - name: otel-config-vol
+      configMap:
+        name: otel-collector-config

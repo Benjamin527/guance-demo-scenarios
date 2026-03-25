@@ -1,0 +1,173 @@
+# ============================================================
+# 1. Namespace
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: datakit
+---
+# ============================================================
+# 2. Sinker 分流规则 ConfigMap
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sinker
+  namespace: datakit
+data:
+  sinker.json: |
+    {
+      "strict": true,
+      "rules": [
+        {
+          "rules": [
+            "{ __dataway_api in ['/v1/datakit/pull', '/v1/election', '/v1/election/heartbeat', '/v1/query/raw', '/v1/workspace', '/v1/object/labels', '/v1/check/token'] }"
+          ],
+          "info": "特殊 API 请求 → 测试空间",
+          "url": "https://openway.guance.com?token=tkn_41cd2be56e0a448180e34f969e19d7c2"
+        },
+        {
+          "rules": [
+            "{ host MATCH ['node.*'] }"
+          ],
+          "info": "node → 空间A",
+          "url": "https://openway.guance.com?token=tkn_9d22b08ea7c14badb832a20336423c43"
+        },
+        {
+          "rules": [
+            "{ host MATCH ['control.*'] }"
+          ],
+          "info": "ruoyi-admin → 空间B",
+          "url": "https://openway.guance.com?token=tkn_41cd2be56e0a448180e34f969e19d7c2"
+        },
+        {
+          "as_default": true,
+          "info": "兜底 → 空间B",
+          "url": "https://openway.guance.com?token=tkn_41cd2be56e0a448180e34f969e19d7c2"
+        }
+      ]
+    }
+---
+# ============================================================
+# 3. Dataway StatefulSet（已修复 PVC）
+# ============================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: sts-datakit-dataway
+  name: dataway   # ✅ 修复拼写
+  namespace: datakit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sts-datakit-dataway
+  serviceName: dataway
+  template:
+    metadata:
+      annotations:
+        datakit/logs: |
+          [{"disable": false, "source": "dataway", "service": "dataway",
+            "multiline_match": "^\\d{4}|^\\[GIN\\]"}]
+        datakit/prom.instances: |
+          [[inputs.prom]]
+            url = "http://$IP:9090/metrics"
+            source = "dataway"
+            measurement_name = "dw"
+            interval = "10s"
+            disable_instance_tag = true
+          [inputs.prom.tags]
+            service = "dataway"
+            instance = "$PODNAME"
+      labels:
+        app: sts-datakit-dataway
+    spec:
+      containers:
+      - name: dataway
+        image: pubrepo.guance.com/dataflux/dataway:1.12.1
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DW_REMOTE_HOST
+          value: "https://openway.guance.com"
+        - name: DW_CASCADED
+          value: "true"
+        - name: DW_LOG_LEVEL
+          value: info
+        - name: DW_BIND
+          value: "0.0.0.0:9528"
+        - name: DW_TLS_INSECURE_SKIP_VERIFY
+          value: "true"
+        - name: DW_UUID
+          value: "agnt_sinker12001717-cee8-4b7e-a778-90093eeeeefc"
+        - name: DW_TOKEN
+          value: "tkn_41cd2be56e0a448180e34f969e19d7c2"
+        - name: DW_SINKER_FILE_PATH
+          value: "/usr/local/cloudcare/dataflux/dataway/sinker.json"
+        - name: DW_PROM_LISTEN
+          value: "0.0.0.0:9090"
+        - name: DW_LOG
+          value: stdout
+        - name: DW_GIN_LOG
+          value: stdout
+        - name: DW_DISKCACHE_DIR
+          value: /dataway-cache
+        - name: DW_DISKCACHE_CAPACITY_MB
+          value: "10240"
+        - name: DW_HTTP_TIMEOUT
+          value: "30s"
+        - name: DW_HTTP_CLIENT_TRACE
+          value: "true"
+        - name: DW_MAX_HTTP_BODY_BYTES
+          value: "67108864"
+        ports:
+        - containerPort: 9528
+          name: 9528tcp01
+          protocol: TCP
+        resources:
+          limits:
+            cpu: "4"
+            memory: 4Gi
+          requests:
+            cpu: 100m
+            memory: 512Mi
+        volumeMounts:
+        - name: sinker
+          mountPath: /usr/local/cloudcare/dataflux/dataway/sinker.json
+          subPath: sinker.json
+        - name: cache-storage
+          mountPath: /dataway-cache
+
+      volumes:
+      - name: sinker
+        configMap:
+          name: sinker
+
+  # ✅ 关键：自动创建 PVC
+  volumeClaimTemplates:
+  - metadata:
+      name: cache-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: local-path   
+---
+# ============================================================
+# 4. Service
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: dataway
+  namespace: datakit
+spec:
+  ports:
+  - name: 9528tcp02
+    port: 9528
+    protocol: TCP
+    targetPort: 9528
+  selector:
+    app: sts-datakit-dataway
+  type: ClusterIP

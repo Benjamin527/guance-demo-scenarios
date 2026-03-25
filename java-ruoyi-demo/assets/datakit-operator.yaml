@@ -1,4 +1,38 @@
-## Datakit-Operator v1.5.10 Configuration YAML
+## DataKit-Operator v1.8.2 Configuration YAML
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: datakit-operator
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["logging.datakits.io"]
+  resources: ["clusterloggingconfigs"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: datakit-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: datakit-operator
+subjects:
+- kind: ServiceAccount
+  name: datakit-operator
+  namespace: datakit
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: datakit-operator
+  namespace: datakit
+
 ---
 apiVersion: v1
 kind: Service
@@ -12,6 +46,7 @@ spec:
     - name: http
       port: 443
       targetPort: 9543
+
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -23,65 +58,121 @@ data:
     {
         "server_listen": "0.0.0.0:9543",
         "log_level":     "info",
-        "admission_inject": {
-            "ddtrace": {
-                "enabled_namespaces":     [{
-                  "namespace": "ruoyi-demo",
-                  "language": "java"
-                }],
-                "enabled_labelselectors": [],
-                "images": {
-                    "java_agent_image": "pubrepo.guance.com/datakit-operator/dd-lib-java-init:v1.36.2-guance"
+        "admission_inject_v2": {
+            "ddtraces": [
+                {
+                    "language": "java",
+                    "namespace_selectors": ["*"],
+                    "label_selectors":     [],
+                    "check_annotation":    false,
+                    "image":    "pubrepo.guance.com/datakit-operator/dd-lib-java-init:latest",
+                    "envs": {
+                        "DD_AGENT_HOST":           "datakit-service.datakit.svc.cluster.local",
+                        "DD_TRACE_AGENT_PORT":     "9529",
+                        "DD_JMXFETCH_STATSD_HOST": "datakit-service.datakit.svc.cluster.local",
+                        "DD_JMXFETCH_STATSD_PORT": "8125",
+                        "DD_SERVICE":              "{fieldRef:metadata.labels['app']}",
+                        "POD_NAME":                "{fieldRef:metadata.name}",
+                        "POD_NAMESPACE":           "{fieldRef:metadata.namespace}",
+                        "NODE_NAME":               "{fieldRef:spec.nodeName}",
+                        "DD_TAGS":                 "pod_name:$(POD_NAME),pod_namespace:$(POD_NAMESPACE),host:$(NODE_NAME)",
+                        "DD_PROFILING_ENABLED": "true",
+                        "DD_PROFILING_DDPROF_ENABLED": "true",
+                        "DD_PROFILING_DDPROF_CPU_ENABLED": "true",
+                        "DD_PROFILING_DDPROF_WALL_ENABLED": "true",
+                        "DD_PROFILING_DDPROF_ALLOC_ENABLED": "true",
+                        "DD_PROFILING_DDPROF_LIVEHEAP_ENABLED": "true",
+                        "DD_PROFILING_DDPROF_MEMLEAK_ENABLED": "true"
+                    }
                 },
-                "envs": {
-                    "DD_AGENT_HOST":           "datakit-service.datakit.svc",
-                    "DD_TRACE_AGENT_PORT":     "9529",
-                    "DD_JMXFETCH_STATSD_HOST": "datakit-service.datakit.svc",
-                    "DD_JMXFETCH_STATSD_PORT": "8125",
-                    "DD_SERVICE":              "{fieldRef:metadata.labels['app']}",
-                    "POD_NAME":                "{fieldRef:metadata.name}",
-                    "POD_NAMESPACE":           "{fieldRef:metadata.namespace}",
-                    "NODE_NAME":               "{fieldRef:spec.nodeName}",
-                    "DD_TAGS":                 "pod_name:$(POD_NAME),pod_namespace:$(POD_NAMESPACE),host:$(NODE_NAME)",
-                    "DD_PROFILING_ENABLED": "true",
-                    "DD_PROFILING_DDPROF_ENABLED": "true",
-                    "DD_PROFILING_DDPROF_CPU_ENABLED": "true",
-                    "DD_PROFILING_DDPROF_WALL_ENABLED": "true",
-                    "DD_PROFILING_DDPROF_ALLOC_ENABLED": "true",
-                    "DD_PROFILING_DDPROF_LIVEHEAP_ENABLED": "true",
-                    "DD_PROFILING_DDPROF_MEMLEAK_ENABLED": "true"
+                {
+                    "language": "python",
+                    "namespace_selectors": ["default"],
+                    "label_selectors":     [],
+                    "check_annotation":    false,
+                    "image":    "pubrepo.guance.com/datakit-operator/dd-lib-python-init:v1.6.2",
+                    "envs": {
+                        "DD_AGENT_HOST":           "datakit-service.datakit.svc.cluster.local",
+                        "DD_TRACE_AGENT_PORT":     "9529",
+                        "DD_JMXFETCH_STATSD_HOST": "datakit-service.datakit.svc.cluster.local",
+                        "DD_JMXFETCH_STATSD_PORT": "8125",
+                        "DD_SERVICE":              "{fieldRef:metadata.labels['app']}",
+                        "POD_NAME":                "{fieldRef:metadata.name}",
+                        "POD_NAMESPACE":           "{fieldRef:metadata.namespace}",
+                        "NODE_NAME":               "{fieldRef:spec.nodeName}",
+                        "DD_TAGS":                 "pod_name:$(POD_NAME),pod_namespace:$(POD_NAMESPACE),host:$(NODE_NAME)"
+                    }
                 }
-            },
-            "logfwd": {
-                "options": {
-                    "reuse_exist_volume": "false"
-                },
-                "images": {
-                    "logfwd_image": "pubrepo.guance.com/datakit/logfwd:1.26.0"
-                },
-                "envs": {
-                    "LOGFWD_GLOBAL_SERVICE": "{fieldRef:metadata.labels['app']}",
-                    "LOGFWD_POD_NAME":       "{fieldRef:metadata.name}",
-                    "LOGFWD_POD_NAMESPACE":  "{fieldRef:metadata.namespace}"
+            ],
+            "logfwds": [
+                {
+                    "namespace_selectors": ["default"],
+                    "label_selectors":     [],
+                    "image": "pubrepo.guance.com/datakit/logfwd:1.87.0",
+                    "envs": {
+                        "LOGFWD_DATAKIT_HOST":              "{fieldRef:status.hostIP}",
+                        "LOGFWD_DATAKIT_PORT":              "9533",
+                        "LOGFWD_DATAKIT_OPERATOR_ENDPOINT": "datakit-operator.datakit.svc:443",
+                        "LOGFWD_GLOBAL_SERVICE":            "{fieldRef:metadata.labels['app']}",
+                        "LOGFWD_POD_NAME":                  "{fieldRef:metadata.name}",
+                        "LOGFWD_POD_NAMESPACE":             "{fieldRef:metadata.namespace}",
+                        "LOGFWD_POD_IP":                    "{fieldRef:status.podIP}"
+                    },
+                    "resources": {
+                        "requests": {
+                            "cpu":    "100m",
+                            "memory": "128Mi"
+                        },
+                        "limits": {
+                           "cpu":    "200m",
+                           "memory": "256Mi"
+                        }
+                    },
+                    "log_configs": "",
+                    "log_volume_paths": []
                 }
-            },
-            "profiler": {
-                "images": {
-                    "java_profiler_image":   "pubrepo.guance.com/datakit-operator/async-profiler:0.1.0",
-                    "python_profiler_image": "pubrepo.guance.com/datakit-operator/py-spy:0.1.0",
-                    "golang_profiler_image": "pubrepo.guance.com/datakit-operator/pprof:0.1.0"
-                },
-                "envs": {
-                    "DK_AGENT_HOST":  "datakit-service.datakit.svc",
-                    "DK_AGENT_PORT":  "9529",
-                    "DK_PROFILE_VERSION": "1.2.333",
-                    "DK_PROFILE_ENV": "prod",
-                    "DK_PROFILE_DURATION": "240",
-                    "DK_PROFILE_SCHEDULE": "0 * * * *"
+            ],
+            "flameshots": [
+                {
+                    "namespace_selectors": ["default"],
+                    "label_selectors":     [],
+                    "image": "pubrepo.guance.com/datakit/flameshot:latest",
+                    "envs": {
+                        "FLAMESHOT_DATAKIT_ADDR":     "http://datakit-service.datakit:9529/profiling/v1/input",
+                        "FLAMESHOT_MONITOR_INTERVAL": "10s",
+                        "FLAMESHOT_LOG_LEVEL":        "info",
+                        "FLAMESHOT_PROFILING_PATH":   "/flameshot-data",
+                        "FLAMESHOT_LOG_PATH":         "/var/log/flameshot.log",
+                        "FLAMESHOT_HTTP_LOCAL_PORT":  "8089",
+                        "FLAMESHOT_POD_CPU_LIMIT":    "{resourceFieldRef:limits.cpu}",
+                        "FLAMESHOT_POD_MEM_LIMIT":    "{resourceFieldRef:limits.memory}"
+                    },
+                    "resources": {
+                        "requests": {
+                            "cpu":    "100m",
+                            "memory": "128Mi"
+                        },
+                        "limits": {
+                           "cpu":    "200m",
+                           "memory": "256Mi"
+                        }
+                    },
+                    "processes": "",
+                    "enable_prometheus_annotations": true
                 }
-            }
+            ]
+        },
+        "admission_mutate": {
+            "loggings": [
+                {
+                    "namespace_selectors": [],
+                    "label_selectors":     [],
+                    "config": ""
+                }
+            ]
         }
     }
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -100,9 +191,10 @@ spec:
       labels:
         app: datakit-operator
     spec:
+      serviceAccountName: datakit-operator
       containers:
         - name: operator
-          image: pubrepo.guance.com/datakit-operator/datakit-operator:v1.5.10
+          image: pubrepo.guance.com/datakit-operator/datakit-operator:v1.8.2
           imagePullPolicy: Always
           env:
           - name: ENV_JSON_CONFIG
@@ -120,6 +212,7 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration

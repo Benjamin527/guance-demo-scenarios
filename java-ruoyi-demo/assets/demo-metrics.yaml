@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-dummy-exporter
+  namespace: metrics
+  labels:
+    app: prometheus-dummy-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-dummy-exporter
+  template:
+    metadata:
+      labels:
+        app: prometheus-dummy-exporter
+    spec:
+      containers:
+        - name: exporter
+          image: us-docker.pkg.dev/google-samples/containers/gke/prometheus-dummy-exporter:v0.2.0
+          command:
+            - /prometheus-dummy-exporter
+          args:
+            - --metric-name=custom_prometheus
+            - --metric-value=40
+            - --port=8080
+          ports:
+            - containerPort: 8080
+              name: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-dummy-exporter
+  namespace: metrics
+  labels:
+    app: prometheus-dummy-exporter
+spec:
+  selector:
+    app: prometheus-dummy-exporter
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: metrics
+      name: metrics
